@@ -124,7 +124,7 @@ func main() {
 
 	middleware := ja4plus.NewJ4AMiddleware()
 
-	listener, err := ja4plus.NewListenerWrapper(middleware, tlsConfig, 9001)
+	listener, err := ja4plus.NewListenerWrapper(middleware, tlsConfig, ":9001")
 	if err != nil {
 		log.Fatal(err)
 	}

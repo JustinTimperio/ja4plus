@@ -116,7 +116,7 @@ func TestMiddlewareListener(t *testing.T) {
 
 	ja4Middleware := ja4plus.NewJ4AMiddleware()
 
-	listener, err := ja4plus.NewListenerWrapper(ja4Middleware, config, 9001)
+	listener, err := ja4plus.NewListenerWrapper(ja4Middleware, config, ":9001")
 	if err != nil {
 		t.Error(err)
 	}
@@ -169,7 +169,7 @@ func generateSelfSignedCert() ([]byte, []byte, error) {
 	template := x509.Certificate{
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
-			Organization: []string{"Tripwire"},
+			Organization: []string{"ja4plus-test-cert"},
 		},
 		NotBefore: notBefore,
 		NotAfter:  notAfter,
