@@ -1,0 +1,101 @@
+package ja4plus
+
+import (
+	"context"
+	"crypto/tls"
+	"fmt"
+	"net"
+	"net/http"
+	"sync"
+)
+
+// JA4Middleware is a helper to plug the JA4 fingerprinting into your HTTP server.
+// It only exists because there is no direct way to pass information from the TLS handshake to the HTTP handler.
+type JA4Middleware struct {
+	connectionFingerprints sync.Map
+	tlsConfig              *tls.Config
+}
+
+type ja4FingerprintCtxKey struct{}
+
+func NewJ4AMiddleware() *JA4Middleware {
+	return &JA4Middleware{
+		connectionFingerprints: sync.Map{},
+	}
+}
+
+// Wrap wraps the provided [http.Handler] and injects the JA4 fingerprint into the [http.Request.Context].
+// It requires a server set up with [JA4Middleware] to work.
+func (m *JA4Middleware) NewHandlerWrapper(middleware *JA4Middleware, tlsConfig *tls.Config, next http.Handler) http.Handler {
+
+	tlsConfig.GetConfigForClient = func(chi *tls.ClientHelloInfo) (*tls.Config, error) {
+		middleware.storeFingerprintFromClientHello(chi)
+		return nil, nil
+	}
+	middleware.tlsConfig = tlsConfig
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		if cacheEntry, _ := m.connectionFingerprints.Load(r.RemoteAddr); cacheEntry != nil {
+			ctx = context.WithValue(ctx, ja4FingerprintCtxKey{}, cacheEntry.(string))
+		}
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func NewListenerWrapper(middleware *JA4Middleware, tlsConfig *tls.Config, port int) (net.Listener, error) {
+	tlsConfig.GetConfigForClient = func(chi *tls.ClientHelloInfo) (*tls.Config, error) {
+		middleware.storeFingerprintFromClientHello(chi)
+		return nil, nil
+	}
+
+	middleware.tlsConfig = tlsConfig
+
+	listen, err := tls.Listen("tcp", fmt.Sprintf(":%d", port), tlsConfig)
+	if err != nil {
+		return nil, err
+
+	}
+
+	return listen, nil
+}
+
+// ConnStateCallback is a callback that should be set as the [http.Server]'s ConnState to clean up the fingerprint cache.
+func (m *JA4Middleware) HTTPCallback(conn net.Conn, state http.ConnState) {
+	switch state {
+	case http.StateClosed, http.StateHijacked:
+		m.connectionFingerprints.Delete(conn.RemoteAddr().String())
+	}
+}
+
+// ConnStateCallback is a callback that should be set as the [http.Server]'s ConnState to clean up the fingerprint cache.
+func (m *JA4Middleware) ListenerCallback(conn net.Conn) {
+	m.connectionFingerprints.Delete(conn.RemoteAddr().String())
+}
+
+// Returns the modified TLS config
+func (m *JA4Middleware) ReturnTLSConfig() *tls.Config {
+	return m.tlsConfig
+}
+
+func (m *JA4Middleware) storeFingerprintFromClientHello(hello *tls.ClientHelloInfo) {
+	m.connectionFingerprints.Store(hello.Conn.RemoteAddr().String(), JA4(hello))
+}
+
+// JA4FromContext extracts the JA4 fingerprint from the provided [http.Request.Context].
+// It requires a server set up with [JA4Middleware] to work.
+func JA4FromContext(ctx context.Context) (string, bool) {
+	fingerprint, ok := ctx.Value(ja4FingerprintCtxKey{}).(string)
+	return fingerprint, ok
+}
+
+// ConnStateCallback is a callback that should be set as the [http.Server]'s ConnState to clean up the fingerprint cache.
+func JA4FromListener(m *JA4Middleware, conn net.Conn) (string, bool) {
+	fingerprint, ok := m.connectionFingerprints.Load(conn.RemoteAddr().String())
+	if !ok {
+		return "", ok
+	}
+
+	f, ok := fingerprint.(string)
+	return f, ok
+}
