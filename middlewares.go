@@ -3,6 +3,7 @@ package ja4plus
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"net"
 	"net/http"
 	"sync"
@@ -29,8 +30,12 @@ func NewJ4AMiddleware() *JA4Middleware {
 func (m *JA4Middleware) NewHandlerWrapper(middleware *JA4Middleware, tlsConfig *tls.Config, next http.Handler) http.Handler {
 
 	tlsConfig.GetConfigForClient = func(chi *tls.ClientHelloInfo) (*tls.Config, error) {
-		middleware.storeFingerprintFromClientHello(chi)
-		return nil, nil
+		// Protects against panics when generating the JA4
+		if chi != nil {
+			m.connectionFingerprints.Store(chi.Conn.RemoteAddr().String(), JA4(chi))
+			return nil, nil
+		}
+		return nil, fmt.Errorf("Failed to extract client tls hello")
 	}
 	middleware.tlsConfig = tlsConfig
 
@@ -46,9 +51,14 @@ func (m *JA4Middleware) NewHandlerWrapper(middleware *JA4Middleware, tlsConfig *
 // NewListenerWrapper takes a middleware, a tls config and a address and returns a fully wrapped net.Listener.
 // You will still need to manually clear fingerprints from memory as connections close with ListenerCallback.
 func NewListenerWrapper(middleware *JA4Middleware, tlsConfig *tls.Config, addr string) (net.Listener, error) {
+
 	tlsConfig.GetConfigForClient = func(chi *tls.ClientHelloInfo) (*tls.Config, error) {
-		middleware.storeFingerprintFromClientHello(chi)
-		return nil, nil
+		// Protects against panics when generating the JA4
+		if chi != nil {
+			middleware.connectionFingerprints.Store(chi.Conn.RemoteAddr().String(), JA4(chi))
+			return nil, nil
+		}
+		return nil, fmt.Errorf("Failed to extract client tls hello")
 	}
 
 	middleware.tlsConfig = tlsConfig
@@ -70,7 +80,7 @@ func (m *JA4Middleware) HTTPCallback(conn net.Conn, state http.ConnState) {
 	}
 }
 
-// Listener is a manually called deletion method for clearing fingerprint state after a connection is closed
+// ListenerCallback is a manually called deletion method for clearing fingerprint state after a connection is closed
 func (m *JA4Middleware) ListenerCallback(conn net.Conn) {
 	m.connectionFingerprints.Delete(conn.RemoteAddr().String())
 }
@@ -80,18 +90,14 @@ func (m *JA4Middleware) ReturnTLSConfig() *tls.Config {
 	return m.tlsConfig
 }
 
-func (m *JA4Middleware) storeFingerprintFromClientHello(hello *tls.ClientHelloInfo) {
-	m.connectionFingerprints.Store(hello.Conn.RemoteAddr().String(), JA4(hello))
-}
-
 // JA4FromContext extracts the JA4 fingerprint from the provided [http.Request.Context].
 func JA4FromContext(ctx context.Context) (string, bool) {
 	fingerprint, ok := ctx.Value(ja4FingerprintCtxKey{}).(string)
 	return fingerprint, ok
 }
 
-// JA4FromContext extracts the JA4 fingerprint from the provided middleware and current net connection.
-func JA4FromListener(m *JA4Middleware, conn net.Conn) (string, bool) {
+// JA4FromContext extracts the JA4 fingerprint from the middleware using the a connection.
+func (m *JA4Middleware) JA4FromConn(conn net.Conn) (string, bool) {
 	fingerprint, ok := m.connectionFingerprints.Load(conn.RemoteAddr().String())
 	if !ok {
 		return "", ok

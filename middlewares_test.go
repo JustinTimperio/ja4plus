@@ -114,9 +114,9 @@ func TestMiddlewareListener(t *testing.T) {
 		CipherSuites: supported,
 	}
 
-	ja4Middleware := ja4plus.NewJ4AMiddleware()
+	middleware := ja4plus.NewJ4AMiddleware()
 
-	listener, err := ja4plus.NewListenerWrapper(ja4Middleware, config, ":9001")
+	listener, err := ja4plus.NewListenerWrapper(middleware, config, ":9001")
 	if err != nil {
 		t.Error(err)
 	}
@@ -132,24 +132,25 @@ func TestMiddlewareListener(t *testing.T) {
 			tlsConn, ok := conn.(*tls.Conn)
 			if ok {
 				tlsConn.Handshake()
-				fmt.Println(ja4plus.JA4FromListener(ja4Middleware, tlsConn))
+				fmt.Println(middleware.JA4FromConn(tlsConn))
 
 				buffer := make([]byte, 1024)
 				for {
 					_, err := tlsConn.Read(buffer)
 					if err != nil {
-						ja4Middleware.ListenerCallback(tlsConn)
+						middleware.ListenerCallback(tlsConn)
 						break
 					}
 				}
 
-			} else {
-				t.Error("Connection is not TLS")
+				return
 			}
+
+			t.Error("Connection is not TLS")
 		}
 	}()
 
-	time.Sleep(time.Second * 25)
+	time.Sleep(time.Second * 30)
 }
 
 func generateSelfSignedCert() ([]byte, []byte, error) {

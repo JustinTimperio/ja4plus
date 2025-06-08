@@ -43,7 +43,7 @@ The `JA4Middleware` struct and its associated methods are designed to bridge the
 *   **Certificate Management:** Ensure you have valid TLS certificates configured for your server.
 *   **Connection Cache:** The `JA4Middleware` stores fingerprints in a `sync.Map` indexed by client's remote address. The `HTTPCallback` function should be set on your `http.Server`'s `ConnState` to clean up this cache automatically when connections are closed. The net listener though *must sadly be manually cleaned* up using the `ListenerCallback` to avoid memory leaks in the same way as the http server.
 
-### Code Example (HTTP Server)
+### HTTP Server Example
 
 ```go
 package main
@@ -60,6 +60,7 @@ import (
 
 func main() {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Echo the hash back to the client
 		hash, ok := ja4plus.JA4FromContext(r.Context())
 		if !ok {
 			io.WriteString(w, "missing hash")
@@ -84,9 +85,9 @@ func main() {
 	// Create an HTTP server
 	srv := http.Server{
 		Addr:      ":9000",
-		Handler:   middleware.NewHandlerWrapper(middleware, tlsConfig, handler),
+		Handler:   middleware.NewHandlerWrapper(middleware, tlsConfig, handler), // Generate a new http wrapper
 		ConnState: middleware.HTTPCallback, // Clean up connection cache
-		TLSConfig: middleware.ReturnTLSConfig(),
+		TLSConfig: middleware.ReturnTLSConfig(), // Use the wrapped tls config
 	}
 
 	// Start the server
@@ -94,9 +95,9 @@ func main() {
 }
 ```
 
-### Code Example (TLS Listener)
+### TLS Listener Example
 
-This demonstrates how to use JA4Plus with a raw TLS listener, rather than an HTTP server.
+This demonstrates how to use JA4Plus with a raw TLS listener.
 
 ```go
 package main
@@ -150,13 +151,16 @@ func handleConnection(conn net.Conn, middleware *ja4plus.JA4Middleware) {
 	}
 
 	tlsConn.Handshake()
-	hash, ok := ja4plus.JA4FromListener(middleware, tlsConn)
-	if !ok {
-		log.Println("failed to retrieve hash from listener")
+	hash, ok := middleware.JA4FromConn(tlsConn)
+	if ok {
+		// Manually clean fingerprint from the middleware
+		middleware.ListenerCallback(tlsConn)
+		log.Println("Got fingerprint:", hash)
 		return
 	}
 
-	fmt.Println(hash)
+	log.Println("failed to retrieve hash from listener")
 }
+
 ```
 
