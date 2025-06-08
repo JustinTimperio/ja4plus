@@ -75,7 +75,7 @@ func TestHTTPMiddleware(t *testing.T) {
 	}
 	go srv.ListenAndServeTLS("server.crt", "server.key")
 
-	time.Sleep(time.Second * 25)
+	time.Sleep(time.Second * 30)
 }
 
 func TestMiddlewareListener(t *testing.T) {
